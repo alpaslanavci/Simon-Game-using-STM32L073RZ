@@ -41,7 +41,8 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SEQUENCE_LENGTH 4
+#define INITIAL_SEQUENCE_LENGTH 2
+#define MAX_SEQUENCE_LENGTH 8
 #define DEBOUNCE_TIME_MS 200
 #define LED_FEEDBACK_DURATION_MS 300
 #define BUZZER_DURATION 200
@@ -60,12 +61,19 @@ UART_HandleTypeDef huart2;
 volatile GameState_t g_gameState = STATE_IDLE;
 volatile bool g_gameRunning = false;
 
-uint8_t g_generatedSequence[SEQUENCE_LENGTH];
-uint8_t g_playerSequence[SEQUENCE_LENGTH];
+uint8_t g_generatedSequence[MAX_SEQUENCE_LENGTH];
+uint8_t g_playerSequence[MAX_SEQUENCE_LENGTH];
 volatile uint8_t g_currentPlayerInputIndex = 0; 
+volatile uint8_t g_currentSequenceLength = INITIAL_SEQUENCE_LENGTH;
 
 volatile uint8_t g_ledFeedbackActive = 0; // 0 = no feedback, 1 = red LED, 2 = green LED, 3 = yellow LED
 volatile uint32_t g_ledFeedbackStartTime = 0;
+volatile bool g_stateInitialized = false;
+volatile uint32_t g_stateTimestamp = 0;
+volatile uint8_t g_stateStep = 0;
+volatile uint8_t g_sequenceDisplayIndex = 0;
+volatile bool g_sequenceLedOn = false;
+volatile bool g_lastSequenceMatch = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -78,8 +86,9 @@ static void EnableGameButtonInterrupts(void);
 static void DisableGameButtonInterrupts(void);
 static void EnableStartButtonInterrupt(void);
 static void DisableStartButtonInterrupt(void);
-static void BuzzerBeep(uint32_t duration);
-static void DisplaySequence(uint8_t ledValue, uint32_t onDuration, uint32_t offDuration);
+static void SetGameState(GameState_t newState);
+static void SetAllGameLeds(GPIO_PinState state);
+static void SetSequenceLed(uint8_t ledValue, GPIO_PinState state);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -114,47 +123,41 @@ static void DisableStartButtonInterrupt(void)
     HAL_NVIC_DisableIRQ(EXTI4_15_IRQn);
 }
 
+static void SetGameState(GameState_t newState)
+{
+    g_gameState = newState;
+    g_stateInitialized = false;
+}
+
 static void PrepareForNextInput(void)
 {
-    if (g_currentPlayerInputIndex < SEQUENCE_LENGTH)
+    if (g_currentPlayerInputIndex < g_currentSequenceLength)
     {
         EnableGameButtonInterrupts();
     }
 }
 
-//Buzzer function to beep for a specified duration
-static void BuzzerBeep(uint32_t duration)
+static void SetAllGameLeds(GPIO_PinState state)
 {
-	for (int i = 0; i < 5; i++)
-	{
-		HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-		HAL_Delay(duration);
-		HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-		HAL_Delay(duration);
-	}
+  HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, state);
+  HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, state);
+  HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, state);
 }
 
-static void DisplaySequence(uint8_t ledValue, uint32_t onDuration, uint32_t offDuration)
+static void SetSequenceLed(uint8_t ledValue, GPIO_PinState state)
 {
+  SetAllGameLeds(GPIO_PIN_RESET);
+
   switch (ledValue)
   {
     case 0: //red led
-      HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-      HAL_Delay(onDuration);
-      HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-      HAL_Delay(offDuration);
+      HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, state);
       break;
     case 1: //green led
-      HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
-      HAL_Delay(onDuration);
-      HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-      HAL_Delay(offDuration);
+      HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, state);
       break;
     case 2: //yellow led
-      HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_SET);
-      HAL_Delay(onDuration);
-      HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_RESET);
-      HAL_Delay(offDuration);
+      HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, state);
       break;
   }
 }
@@ -210,62 +213,106 @@ int main(void)
     {
       case STATE_IDLE:
 
-        DisableGameButtonInterrupts();
-        EnableStartButtonInterrupt();
-        g_gameRunning = false;
-        g_currentPlayerInputIndex = 0;
-        for (int i = 0; i < SEQUENCE_LENGTH; i++)
+        if (!g_stateInitialized)
         {
-          g_playerSequence[i] = 0;
+          DisableGameButtonInterrupts();
+          EnableStartButtonInterrupt();
+          g_gameRunning = false;
+          g_currentPlayerInputIndex = 0;
+          g_currentSequenceLength = INITIAL_SEQUENCE_LENGTH;
+          g_ledFeedbackActive = 0;
+          for (int i = 0; i < MAX_SEQUENCE_LENGTH; i++)
+          {
+            g_playerSequence[i] = 0;
+          }
+          SetAllGameLeds(GPIO_PIN_RESET);
+          HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_RESET);
+          g_stateInitialized = true;
         }
-        HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_RESET);
         break;
 
       case STATE_STARTUP:
 
-        DisableGameButtonInterrupts();
-        for (int i = 0; i < 3; i++)
+        if (!g_stateInitialized)
         {
-          HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-          HAL_Delay(500);
-          HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET);
-          HAL_Delay(500);
-          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-          HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_SET);
-          HAL_Delay(500);
-          HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_RESET);
+          DisableGameButtonInterrupts();
+          g_stateStep = 0;
+          g_stateTimestamp = HAL_GetTick();
+          SetSequenceLed(0, GPIO_PIN_SET);
+          g_stateInitialized = true;
         }
-        HAL_Delay(1000);
 
-        g_gameState = STATE_GENERATE_AND_DISPLAY_SEQUENCE;
+        if (g_stateStep < 9U && (HAL_GetTick() - g_stateTimestamp) >= 500U)
+        {
+          g_stateTimestamp = HAL_GetTick();
+          if (g_stateStep < 8U)
+          {
+            g_stateStep++;
+            SetSequenceLed(g_stateStep % 3U, GPIO_PIN_SET);
+          }
+          else if (g_stateStep == 8U)
+          {
+            SetAllGameLeds(GPIO_PIN_RESET);
+            g_stateStep = 9U;
+          }
+        }
+        else if (g_stateStep == 9U && (HAL_GetTick() - g_stateTimestamp) >= 1000U)
+        {
+          SetGameState(STATE_GENERATE_AND_DISPLAY_SEQUENCE);
+        }
         break;
 
       case STATE_GENERATE_AND_DISPLAY_SEQUENCE:
 
-        DisableGameButtonInterrupts();
-        g_currentPlayerInputIndex = 0;
-
-        for (int i = 0; i < SEQUENCE_LENGTH; i++)
+        if (!g_stateInitialized)
         {
-          g_generatedSequence[i] = rand() % 3;
+          DisableGameButtonInterrupts();
+          g_currentPlayerInputIndex = 0;
+          for (int i = 0; i < g_currentSequenceLength; i++)
+          {
+            g_generatedSequence[i] = rand() % 3;
+          }
+          g_sequenceDisplayIndex = 0;
+          g_sequenceLedOn = true;
+          SetSequenceLed(g_generatedSequence[g_sequenceDisplayIndex], GPIO_PIN_SET);
+          g_stateTimestamp = HAL_GetTick();
+          g_stateInitialized = true;
         }
 
-        for (int i = 0; i < SEQUENCE_LENGTH; i++)
+        if (g_sequenceLedOn)
         {
-          DisplaySequence(g_generatedSequence[i], 500, 500); // Display each LED in the sequence
+          if ((HAL_GetTick() - g_stateTimestamp) >= 500U)
+          {
+            SetAllGameLeds(GPIO_PIN_RESET);
+            g_sequenceLedOn = false;
+            g_stateTimestamp = HAL_GetTick();
+          }
         }
-        HAL_Delay(2000);
-        g_gameState = STATE_WAIT_FOR_PLAYER_INPUT;
+        else
+        {
+          if (g_sequenceDisplayIndex < (g_currentSequenceLength - 1U))
+          {
+            if ((HAL_GetTick() - g_stateTimestamp) >= 500U)
+            {
+              g_sequenceDisplayIndex++;
+              SetSequenceLed(g_generatedSequence[g_sequenceDisplayIndex], GPIO_PIN_SET);
+              g_sequenceLedOn = true;
+              g_stateTimestamp = HAL_GetTick();
+            }
+          }
+          else if ((HAL_GetTick() - g_stateTimestamp) >= 2000U)
+          {
+            SetGameState(STATE_WAIT_FOR_PLAYER_INPUT);
+          }
+        }
         break;
 
       case STATE_WAIT_FOR_PLAYER_INPUT:
 
         PrepareForNextInput();
 
-        if (g_ledFeedbackActive > 0 && g_currentPlayerInputIndex < SEQUENCE_LENGTH)
+        if (g_ledFeedbackActive > 0 && g_currentPlayerInputIndex < g_currentSequenceLength)
         {
           uint32_t currentTime = HAL_GetTick();
           if (currentTime - g_ledFeedbackStartTime >= LED_FEEDBACK_DURATION_MS)
@@ -281,63 +328,126 @@ int main(void)
 
       case STATE_EVALUATE_SEQUENCE:
 
-        DisableGameButtonInterrupts();
-
-        if (g_ledFeedbackActive > 0)
+        if (!g_stateInitialized)
         {
-            uint32_t currentTimeEval = HAL_GetTick();
-            if (currentTimeEval - g_ledFeedbackStartTime < LED_FEEDBACK_DURATION_MS)
+          DisableGameButtonInterrupts();
+          g_lastSequenceMatch = true;
+          for (int i = 0; i < g_currentSequenceLength; i++)
+          {
+            if (g_generatedSequence[i] != g_playerSequence[i])
             {
-                HAL_Delay(LED_FEEDBACK_DURATION_MS - (currentTimeEval - g_ledFeedbackStartTime));
+              g_lastSequenceMatch = false;
+              break;
             }
+          }
+          g_stateStep = 0;
+          g_stateInitialized = true;
         }
 
-        HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(YELLOW_LED_GPIO_Port, YELLOW_LED_Pin, GPIO_PIN_RESET);
-        g_ledFeedbackActive = 0;
-
-        _Bool sequenceMatch = 1;
-        for (int i = 0; i < SEQUENCE_LENGTH; i++)
+        if (g_stateStep == 0U)
         {
-          if (g_generatedSequence[i] != g_playerSequence[i])
+          if (g_ledFeedbackActive > 0 &&
+              (HAL_GetTick() - g_ledFeedbackStartTime) < LED_FEEDBACK_DURATION_MS)
           {
-            sequenceMatch = 0;
             break;
           }
+
+          SetAllGameLeds(GPIO_PIN_RESET);
+          g_ledFeedbackActive = 0;
+          g_stateTimestamp = HAL_GetTick();
+          g_stateStep = 1U;
         }
 
-        HAL_Delay(1000);
-        if (sequenceMatch) { g_gameState = STATE_SUCCESS_BLINK; }
-        else { g_gameState = STATE_FAILURE_BLINK; }
+        if (g_stateStep == 1U && (HAL_GetTick() - g_stateTimestamp) >= 1000U)
+        {
+          if (g_lastSequenceMatch) { SetGameState(STATE_SUCCESS_BLINK); }
+          else { SetGameState(STATE_FAILURE_BLINK); }
+        }
         break;
 
       case STATE_SUCCESS_BLINK:
 
-    	EnableStartButtonInterrupt();
-        for (int i = 0; i < 2; i++)
+        if (!g_stateInitialized)
         {
+          EnableStartButtonInterrupt();
+          g_stateStep = 0;
           HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_SET);
-          HAL_Delay(250);
-          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_RESET);
-          HAL_Delay(250);
+          g_stateTimestamp = HAL_GetTick();
+          g_stateInitialized = true;
         }
-        HAL_Delay(1000);
-        g_gameState = STATE_GENERATE_AND_DISPLAY_SEQUENCE;
+
+        if (g_stateStep < 3U)
+        {
+          if ((HAL_GetTick() - g_stateTimestamp) >= 250U)
+          {
+            HAL_GPIO_TogglePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin);
+            g_stateStep++;
+            g_stateTimestamp = HAL_GetTick();
+          }
+        }
+        else if (g_stateStep == 3U)
+        {
+          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_RESET);
+          if (g_currentSequenceLength < MAX_SEQUENCE_LENGTH)
+          {
+            g_currentSequenceLength++;
+          }
+          g_stateStep = 4U;
+          g_stateTimestamp = HAL_GetTick();
+        }
+        else if ((HAL_GetTick() - g_stateTimestamp) >= 1000U)
+        {
+          SetGameState(STATE_GENERATE_AND_DISPLAY_SEQUENCE);
+        }
         break;
 
       case STATE_FAILURE_BLINK:
 
-    	  BuzzerBeep(BUZZER_DURATION);
-        for (int i = 0; i < 3; i++)
+        if (!g_stateInitialized)
         {
-          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_SET);
-          HAL_Delay(250);
           HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_RESET);
-          HAL_Delay(250);
+          HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+          g_stateStep = 0;
+          g_stateTimestamp = HAL_GetTick();
+          g_stateInitialized = true;
         }
-        HAL_Delay(1000);
-        g_gameState = STATE_GENERATE_AND_DISPLAY_SEQUENCE;
+
+        if (g_stateStep < 9U)
+        {
+          if ((HAL_GetTick() - g_stateTimestamp) >= BUZZER_DURATION)
+          {
+            HAL_GPIO_TogglePin(BUZZER_GPIO_Port, BUZZER_Pin);
+            g_stateStep++;
+            g_stateTimestamp = HAL_GetTick();
+          }
+        }
+        else if (g_stateStep == 9U)
+        {
+          HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_SET);
+          g_stateStep = 10U;
+          g_stateTimestamp = HAL_GetTick();
+        }
+        else if (g_stateStep < 15U)
+        {
+          if ((HAL_GetTick() - g_stateTimestamp) >= 250U)
+          {
+            HAL_GPIO_TogglePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin);
+            g_stateStep++;
+            g_stateTimestamp = HAL_GetTick();
+          }
+        }
+        else if (g_stateStep == 15U)
+        {
+          HAL_GPIO_WritePin(INDICATOR_LED_GPIO_Port, INDICATOR_LED_Pin, GPIO_PIN_RESET);
+          g_currentSequenceLength = INITIAL_SEQUENCE_LENGTH;
+          g_stateStep = 16U;
+          g_stateTimestamp = HAL_GetTick();
+        }
+        else if ((HAL_GetTick() - g_stateTimestamp) >= 1000U)
+        {
+          SetGameState(STATE_GENERATE_AND_DISPLAY_SEQUENCE);
+        }
         break;
     }
   }
@@ -501,27 +611,57 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  static uint32_t lastButtonPressTime = 0;
-  static uint32_t startButtonPressTime = 0;
+  static uint32_t lastStartButtonPressTime = 0;
+  static uint32_t lastRedButtonPressTime = 0;
+  static uint32_t lastGreenButtonPressTime = 0;
+  static uint32_t lastYellowButtonPressTime = 0;
   uint32_t currentTime = HAL_GetTick();
 
-  if (currentTime - lastButtonPressTime < DEBOUNCE_TIME_MS) 
+  if (GPIO_Pin == START_BUTTON_Pin)
+  {
+    if (currentTime - lastStartButtonPressTime < DEBOUNCE_TIME_MS)
+    {
+      __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+      return;
+    }
+    lastStartButtonPressTime = currentTime;
+  }
+  else if (GPIO_Pin == RED_BUTTON_Pin)
+  {
+    if (currentTime - lastRedButtonPressTime < DEBOUNCE_TIME_MS)
+    {
+      __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+      return;
+    }
+    lastRedButtonPressTime = currentTime;
+  }
+  else if (GPIO_Pin == GREEN_BUTTON_Pin)
+  {
+    if (currentTime - lastGreenButtonPressTime < DEBOUNCE_TIME_MS)
+    {
+      __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+      return;
+    }
+    lastGreenButtonPressTime = currentTime;
+  }
+  else if (GPIO_Pin == YELLOW_BUTTON_Pin)
+  {
+    if (currentTime - lastYellowButtonPressTime < DEBOUNCE_TIME_MS)
+    {
+      __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+      return;
+    }
+    lastYellowButtonPressTime = currentTime;
+  }
+  else
   {
     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
     return;
   }
 
-  if (currentTime - startButtonPressTime < DEBOUNCE_TIME_MS)
-  {
-    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
-    return;
-  }
-
-  if (g_gameState == STATE_WAIT_FOR_PLAYER_INPUT && g_currentPlayerInputIndex < SEQUENCE_LENGTH)
+  if (g_gameState == STATE_WAIT_FOR_PLAYER_INPUT && g_currentPlayerInputIndex < g_currentSequenceLength)
   {
     DisableGameButtonInterrupts();
-
-    lastButtonPressTime = currentTime;
 
     if (GPIO_Pin == RED_BUTTON_Pin)
     {
@@ -554,9 +694,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
     g_currentPlayerInputIndex++;
 
-    if ( g_currentPlayerInputIndex >= SEQUENCE_LENGTH )
+    if ( g_currentPlayerInputIndex >= g_currentSequenceLength )
     {
-      g_gameState = STATE_EVALUATE_SEQUENCE;
+      SetGameState(STATE_EVALUATE_SEQUENCE);
     }
   }
   else if ( g_gameState == STATE_IDLE )
@@ -570,13 +710,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
     else if (GPIO_Pin == START_BUTTON_Pin)
     {
-      startButtonPressTime = currentTime;
       if (!g_gameRunning)
       {
         g_gameRunning = true;
-        g_gameState = STATE_STARTUP;
+        SetGameState(STATE_STARTUP);
         g_currentPlayerInputIndex = 0;
-        for (int i = 0; i < SEQUENCE_LENGTH; i++)
+        g_currentSequenceLength = INITIAL_SEQUENCE_LENGTH;
+        for (int i = 0; i < MAX_SEQUENCE_LENGTH; i++)
         {
           g_playerSequence[i] = 0;
         }
@@ -584,7 +724,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       else
       {
         g_gameRunning = false;
-        g_gameState = STATE_IDLE;
+        SetGameState(STATE_IDLE);
       }
     }
     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
