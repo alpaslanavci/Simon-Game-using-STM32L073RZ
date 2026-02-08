@@ -1,15 +1,8 @@
-# EE 242 Project: Embedded "Simon Says" Game
+# Embedded "Simon Says" Game
 
-This repository contains the source code for a "Simon Says" memory game implemented on an STM32 Nucleo-64 development board. This project was developed as a final project for the EE 242 course.
+This repository contains the source code for a "Simon Says" memory game implemented on an STM32 Nucleo-64 development board.
 
 **Date:** May 2025
-
-## Team Members
-
-* Alpaslan Avcı (20220701013)
-* Adnan Tolga Aksoy (20220701011)
-* Çağan Berk Öztürk (20220701023)
-* Osman Batu Deniz (20220701090)
 
 ## Project Overview
 
