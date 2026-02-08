@@ -1,0 +1,20 @@
+# STM32CubeIDE build output
+Debug/
+Release/
+
+# Linker / binary outputs
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Compiler byproducts
+*.o
+*.d
+*.su
+*.cyclo
+*.mk
+
+# macOS
+.DS_Store

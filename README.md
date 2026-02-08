@@ -13,7 +13,7 @@ This repository contains the source code for a "Simon Says" memory game implemen
 
 ## Project Overview
 
-This project is a hardware implementation of the classic electronic memory game, "Simon Says". The game generates a sequence of colors (Red, Green, Yellow), and the player must replicate the sequence by pressing the corresponding buttons. The game is built around a non-blocking state machine architecture, ensuring responsive user input and efficient operation. It features various user feedback mechanisms, including LEDs and a buzzer, and supports being powered by either USB or an external 5V battery.
+This project is a hardware implementation of the classic electronic memory game, "Simon Says". The game generates a sequence of colors (Red, Green, Yellow), and the player must replicate the sequence by pressing the corresponding buttons. The game is built around a state machine with interrupt-driven button input and timed feedback logic. It features various user feedback mechanisms, including LEDs and a buzzer, and supports being powered by either USB or an external 5V battery.
 
 ## Gameplay
 
@@ -35,7 +35,7 @@ This project is a hardware implementation of the classic electronic memory game,
 
 ## Hardware Requirements
 
-* STM32 Nucleo-64 Development Board (e.g., NUCLEO-F446RE)
+* STM32 Nucleo-64 Development Board (STM32L073RZ)
 * Breadboard
 * 4x Push Buttons (3 for colors, 1 for Start)
 * 3x Colored LEDs (1x Red, 1x Green, 1x Yellow)
@@ -48,4 +48,3 @@ This project is a hardware implementation of the classic electronic memory game,
 ## Code Structure
 
 The entire application logic is contained within `Core/Src/main.c`.
-
